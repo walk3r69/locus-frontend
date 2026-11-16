@@ -95,7 +95,3 @@ As cores foram mantidas suaves para evitar excesso de saturação:
 - verde `#6FA68A` para estados positivos;
 - roxo `#7667A8` para IA e recomendações;
 - azul-acinzentado `#27343B` para texto principal.
-
-## Observação sobre segurança
-
-Não coloque chaves de provedores externos no `.env` do frontend. Mesmo variáveis `VITE_*` ficam expostas no navegador. Use as configurações do backend para Gemini, Google, Amadeus, Redis, PostgreSQL e Firebase Admin.

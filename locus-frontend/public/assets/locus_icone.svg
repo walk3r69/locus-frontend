@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="30 10 140 190" role="img" aria-labelledby="title desc">
+  <title id="title">Ícone Locus</title>
+  <desc id="desc">Marcador de localização com estrela de orientação e rota pontilhada</desc>
+  <path d="M100 20C66 20 42 46 42 78C42 118 100 176 100 176C100 176 158 118 158 78C158 46 134 20 100 20Z" fill="#E9784B"/>
+  <circle cx="100" cy="78" r="31" fill="#FFF8F2"/>
+  <path d="M100 56Q104 74 122 78Q104 82 100 100Q96 82 78 78Q96 74 100 56Z" fill="#7667A8"/>
+  <ellipse cx="100" cy="184" rx="30" ry="6" fill="none" stroke="#6FA68A" stroke-width="3.5" stroke-dasharray="6 5" stroke-linecap="round"/>
+</svg>

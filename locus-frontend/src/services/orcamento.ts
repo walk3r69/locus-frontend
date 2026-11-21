@@ -9,6 +9,6 @@ export async function salvarOrcamento(
   },
 ): Promise<Viagem> {
   throw new Error(
-    "Use /api/itens-orcamento e /api/limites-orcamento para persistir o orçamento no backend.",
+    "A gravação do orçamento ainda não está disponível nesta tela.",
   );
 }

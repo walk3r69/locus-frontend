@@ -49,6 +49,8 @@ export interface ItemRoteiro {
   lat?: number;
   lng?: number;
   endereco?: string;
+  valorEstimado?: number;
+  fonteValor?: string;
 }
 
 export interface ItemOrcamento {
@@ -91,6 +93,7 @@ export interface Viagem {
   dataFim: string;
   transporte: Transporte;
   modoOrcamento: ModoOrcamento;
+  mochilao?: boolean;
   limites: Record<CategoriaOrcamento, number>;
   roteiro: ItemRoteiro[];
   versoes: { id: string; criadaEm: string; itens: ItemRoteiro[] }[];
@@ -152,6 +155,9 @@ export interface OfertaHotel {
   moeda: string;
   taxas: number;
   preco: number;
+  imagemUrl?: string;
+  latitude?: number;
+  longitude?: number;
   fonte: string;
   consultadoEm: string;
   historico: Snapshot[];
@@ -164,6 +170,19 @@ export interface Recomendacao {
   resumo: string;
   justificativa: string;
   evidencia: { fonte: string; consultadoEm: string };
+  consulta?: string;
+  placeId?: string;
+  avaliacao?: number;
+  endereco?: string;
+  lat?: number;
+  lng?: number;
+  categoriaLocal?: string;
+  distanciaKm?: number;
+  dia?: number;
+  duracaoMinutos?: number;
+  valor?: number;
+  categoria?: CategoriaOrcamento;
+  natureza?: NaturezaValor;
   estado?: "aceita" | "rejeitada";
 }
 
@@ -172,6 +191,8 @@ export interface MensagemAssistente {
   autor: "usuario" | "assistente";
   texto: string;
   recomendacoes?: Recomendacao[];
+  consultas?: string[];
+  etapa?: "passagem" | "hospedagem" | "roteiro" | "geral";
   incompleta?: boolean;
   criadaEm: string;
 }
@@ -180,7 +201,7 @@ export interface Notificacao {
   id: string;
   titulo: string;
   texto: string;
-  tipo: "preco" | "roteiro" | "colaboracao" | "sistema";
+  tipo: string;
   lida: boolean;
   criadaEm: string;
 }

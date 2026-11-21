@@ -13,6 +13,26 @@ const numero = (value: unknown, fallback = 0) =>
 const objeto = (value: unknown): Json =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : {};
 
+function rotuloTipoLugar(tipo: unknown): string {
+  const rotulos: Record<string, string> = {
+    tourist_attraction: "Ponto turístico",
+    historical_landmark: "Lugar histórico",
+    museum: "Museu",
+    art_gallery: "Galeria de arte",
+    park: "Parque",
+    beach: "Praia",
+    restaurant: "Restaurante",
+    cafe: "Café",
+    lodging: "Hospedagem",
+    hotel: "Hotel",
+    church: "Igreja",
+    shopping_mall: "Shopping",
+    natural_feature: "Atração natural",
+  };
+  const valor = texto(tipo);
+  return rotulos[valor] || valor.replaceAll("_", " ") || "Ponto de interesse";
+}
+
 function normalizarLugar(raw: unknown): Lugar {
   const value = objeto(raw);
   const displayName = objeto(value.displayName);
@@ -23,7 +43,7 @@ function normalizarLugar(raw: unknown): Lugar {
     placeId: texto(value.id) || texto(value.name),
     nome: texto(displayName.text) || texto(value.name) || "Lugar sem nome",
     endereco: texto(value.formattedAddress) || texto(value.shortFormattedAddress),
-    categoria: texto(types[0]) || "Ponto de interesse",
+    categoria: rotuloTipoLugar(types[0]),
     lat: numero(location.latitude),
     lng: numero(location.longitude),
     descricao: texto(value.editorialSummary),
@@ -39,6 +59,10 @@ function normalizarLugar(raw: unknown): Lugar {
 
 function textoGemini(raw: unknown): string {
   const root = objeto(raw);
+  const choices = Array.isArray(root.choices) ? root.choices : [];
+  const choiceMessage = objeto(objeto(choices[0]).message);
+  const choiceText = texto(choiceMessage.content);
+  if (choiceText) return choiceText;
   const candidates = Array.isArray(root.candidates) ? root.candidates : [];
   const first = objeto(candidates[0]);
   const content = objeto(first.content);
@@ -49,25 +73,173 @@ function textoGemini(raw: unknown): string {
     .join("\n");
 }
 
+function jsonDaResposta(textoResposta: string): Json {
+  const limpo = textoResposta
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  try {
+    return objeto(JSON.parse(limpo));
+  } catch {
+    const inicio = limpo.indexOf("{");
+    const fim = limpo.lastIndexOf("}");
+    if (inicio >= 0 && fim > inicio) {
+      try {
+        return objeto(JSON.parse(limpo.slice(inicio, fim + 1)));
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+}
+
+function normalizarRecomendacoes(raw: unknown): MensagemAssistente["recomendacoes"] {
+  if (!Array.isArray(raw)) return undefined;
+  return raw.map((item: Json, index) => {
+    const value = objeto(item);
+    const evidencia = objeto(value.evidencia);
+    const categoria = texto(value.categoria) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["categoria"];
+    const natureza = texto(value.natureza) as NonNullable<MensagemAssistente["recomendacoes"]>[number]["natureza"];
+    return {
+      id: texto(value.id) || `recomendacao-${Date.now()}-${index}`,
+      tipo: (texto(value.tipo) || "lugar") as NonNullable<MensagemAssistente["recomendacoes"]>[number]["tipo"],
+      titulo: texto(value.titulo) || "Sugestão de viagem",
+      resumo: texto(value.resumo) || "Confira esta possibilidade antes de adicionar ao roteiro.",
+      justificativa: texto(value.justificativa) || "Combina com o contexto informado.",
+      evidencia: {
+        fonte: texto(evidencia.fonte) || "Consulta do Locus",
+        consultadoEm: texto(evidencia.consultadoEm) || new Date().toISOString(),
+      },
+      ...(texto(value.consulta) ? { consulta: texto(value.consulta) } : {}),
+      ...(texto(value.placeId) ? { placeId: texto(value.placeId) } : {}),
+      ...(Number.isFinite(Number(value.avaliacao)) ? { avaliacao: Number(value.avaliacao) } : {}),
+      ...(texto(value.endereco) ? { endereco: texto(value.endereco) } : {}),
+      ...(Number.isFinite(Number(value.lat)) ? { lat: Number(value.lat) } : {}),
+      ...(Number.isFinite(Number(value.lng)) ? { lng: Number(value.lng) } : {}),
+      ...(texto(value.categoriaLocal) ? { categoriaLocal: texto(value.categoriaLocal) } : {}),
+      ...(Number.isInteger(Number(value.dia)) ? { dia: Number(value.dia) } : {}),
+      ...(Number.isInteger(Number(value.duracaoMinutos)) ? { duracaoMinutos: Number(value.duracaoMinutos) } : {}),
+      ...(Number.isFinite(Number(value.valor)) ? { valor: Number(value.valor) } : {}),
+      ...(categoria ? { categoria } : {}),
+      ...(natureza ? { natureza } : {}),
+    };
+  });
+}
+
+function interpretarAssistente(raw: unknown): Pick<MensagemAssistente, "texto" | "recomendacoes" | "consultas" | "etapa"> {
+  const textoResposta = textoGemini(raw);
+  const objetoResposta = jsonDaResposta(textoResposta);
+  const consultas = Array.isArray(objetoResposta.consultas)
+    ? objetoResposta.consultas.map(texto).filter(Boolean)
+    : [];
+  const etapa = texto(objetoResposta.etapa) as MensagemAssistente["etapa"];
+  const recomendacoes = normalizarRecomendacoes(objetoResposta.recomendacoes);
+  return {
+    texto: texto(objetoResposta.resposta) || textoResposta || "Recebi uma resposta vazia. Tente reformular a pergunta.",
+    ...(consultas.length ? { consultas } : {}),
+    ...(recomendacoes?.length ? { recomendacoes } : {}),
+    ...(etapa ? { etapa } : {}),
+  };
+}
+
+type ContextoAssistente = {
+  modoOrcamento?: "fixo" | "aberto";
+  limite?: number;
+  acumulado?: number;
+  origem?: string;
+  destino?: string;
+  dataInicio?: string;
+  dataFim?: string;
+  transporte?: string;
+  interesses?: string[];
+  ritmo?: string;
+  hospedagem?: string;
+  hospedagemBase?: string;
+  roteiro?: string;
+};
+
+function respostaLocalAssistente(textoPergunta: string, contexto?: ContextoAssistente): MensagemAssistente {
+  const destino = contexto?.destino?.trim();
+  const pergunta = textoPergunta.toLowerCase();
+  const querHospedagem = /hotel|hospedagem|pousada|hostel|onde ficar/.test(pergunta);
+  const querPassagem = /passagem|passagens|voo|voos|avião|aviao/.test(pergunta);
+  const consultas = destino
+    ? [
+        querHospedagem
+          ? `hotéis e hospedagens reais em ${destino}`
+          : querPassagem
+            ? `pontos de apoio e aeroporto em ${destino}`
+            : `pontos turísticos, praias e atrações em ${destino}`,
+        ...(contexto?.interesses?.length ? [`${contexto.interesses.join(", ")} em ${destino}`] : []),
+      ]
+    : [];
+  const limite = contexto?.limite == null
+    ? "Orçamento aberto: vou somar cada escolha."
+    : `Saldo disponível aproximado: R$ ${Math.max(0, contexto.limite - (contexto.acumulado ?? 0)).toFixed(2)}.`;
+  return {
+    id: uid(),
+    autor: "assistente",
+    texto: destino
+      ? `Entendi. Vou buscar opções reais em ${destino}, organizar por proximidade e separar as sugestões por dia. ${limite} Confira os resultados e o Street View antes de adicionar.`
+      : "Para montar recomendações reais, preciso saber qual é o destino da viagem. Informe a cidade e o país no chat ou crie uma viagem primeiro.",
+    ...(consultas.length ? { consultas } : {}),
+    etapa: querPassagem ? "passagem" : querHospedagem ? "hospedagem" : "roteiro",
+    criadaEm: new Date().toISOString(),
+  };
+}
+
 // ---------- Assistente Locus (Gemini com fallback Groq no backend) ----------
 export async function perguntarGemini(
   historico: MensagemAssistente[],
   textoPergunta: string,
+  contexto?: ContextoAssistente,
 ): Promise<MensagemAssistente> {
-  const contexto = historico
+  const historicoTexto = historico
     .slice(-8)
     .map((item) => `${item.autor === "usuario" ? "Usuário" : "Assistente"}: ${item.texto}`)
     .join("\n");
-  const prompt = [contexto, `Usuário: ${textoPergunta}`].filter(Boolean).join("\n\n");
-  const raw = await chamar(() =>
-    api.post<Json>(`${BASE}/gemini/conteudo`, { prompt }, { timeout: 30000 }),
-  );
-  return {
-    id: uid(),
-    autor: "assistente",
-    texto: textoGemini(raw) || "Recebi uma resposta vazia. Tente reformular a pergunta.",
-    criadaEm: new Date().toISOString(),
-  };
+  const financeiro = contexto
+    ? `Contexto financeiro: orçamento ${contexto.modoOrcamento === "fixo" ? "FIXO" : "ABERTO"}; `
+      + `valor já acumulado R$ ${(contexto.acumulado ?? 0).toFixed(2)}; `
+      + (contexto.limite == null
+        ? "sem limite máximo."
+        : `limite total R$ ${contexto.limite.toFixed(2)} e saldo restante R$ ${Math.max(0, contexto.limite - (contexto.acumulado ?? 0)).toFixed(2)}.`)
+    : "";
+  const viagem = contexto
+    ? [
+        contexto.origem ? `Origem: ${contexto.origem}.` : "",
+        contexto.destino ? `Destino obrigatório desta viagem: ${contexto.destino}.` : "",
+        contexto.dataInicio && contexto.dataFim ? `Datas: ${contexto.dataInicio} até ${contexto.dataFim}.` : "",
+        contexto.transporte ? `Transporte escolhido: ${contexto.transporte}.` : "",
+        contexto.interesses?.length ? `Interesses: ${contexto.interesses.join(", ")}.` : "",
+        contexto.ritmo ? `Ritmo: ${contexto.ritmo}.` : "",
+        contexto.hospedagem ? `Hospedagem preferida: ${contexto.hospedagem}.` : "",
+        contexto.hospedagemBase ? `Base de proximidade obrigatória: ${contexto.hospedagemBase}. Recomende locais turísticos próximos dessa hospedagem.` : "",
+        contexto.roteiro ? `Itens já adicionados ao roteiro: ${contexto.roteiro}.` : "",
+      ].filter(Boolean).join(" ")
+    : "";
+  const regras = "Não repita saudações nem perguntas já respondidas. Recomende somente locais dentro do destino obrigatório; para locais nomeados, gere consultas ao Google Places e deixe a confirmação dos dados para a busca real. Quando houver hospedagem-base, priorize locais em até 20 km dela e informe que o sistema vai conferir a distância e a rota.";
+  const prompt = [financeiro, viagem, regras, historicoTexto, `Usuário: ${textoPergunta}`]
+    .filter(Boolean)
+    .join("\n\n");
+  try {
+    const raw = await chamar(() =>
+      api.post<Json>(`${BASE}/gemini/conteudo`, { prompt }, { timeout: 30000 }),
+    );
+    const interpretada = interpretarAssistente(raw);
+    if (interpretada.texto !== "Recebi uma resposta vazia. Tente reformular a pergunta." || interpretada.consultas?.length) {
+      return {
+        id: uid(),
+        autor: "assistente",
+        ...interpretada,
+        criadaEm: new Date().toISOString(),
+      };
+    }
+  } catch {
+    // O planejador local mantém o chat útil enquanto o provedor de IA se recupera.
+  }
+  return respostaLocalAssistente(textoPergunta, contexto);
 }
 
 // ---------- Google Places ----------
@@ -153,6 +325,7 @@ export async function calcularRota(
 export interface StreetViewMeta {
   status: string;
   imagemUrl?: string;
+  mapaUrl?: string;
   data?: string;
 }
 
@@ -163,12 +336,15 @@ export async function streetViewMetadata(lat: number, lng: number): Promise<Stre
     }),
   );
   const key = import.meta.env["VITE_GOOGLE_MAPS_API_KEY"] as string | undefined;
-  return key && resultado.status === "OK"
-    ? {
-        ...resultado,
-        imagemUrl: `https://maps.googleapis.com/maps/api/streetview?size=640x360&location=${lat},${lng}&key=${encodeURIComponent(key)}`,
-      }
-    : resultado;
+  return {
+    ...resultado,
+    ...(key && resultado.status === "OK"
+      ? {
+          imagemUrl: `https://maps.googleapis.com/maps/api/streetview?size=640x360&location=${lat},${lng}&key=${encodeURIComponent(key)}`,
+        }
+      : {}),
+    mapaUrl: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`,
+  };
 }
 
 // ---------- Catálogo de ofertas do Locus ----------
@@ -180,6 +356,9 @@ function normalizarVoo(raw: unknown): OfertaVoo {
   const segments = Array.isArray(firstItinerary.segments) ? firstItinerary.segments : [];
   const first = objeto(segments[0]);
   const last = objeto(segments[segments.length - 1]);
+  const returnItinerary = objeto(itineraries[1]);
+  const returnSegments = Array.isArray(returnItinerary.segments) ? returnItinerary.segments : [];
+  const returnDeparture = objeto(objeto(returnSegments[0]).departure);
   const departure = objeto(first.departure);
   const arrival = objeto(last.arrival);
   return {
@@ -190,7 +369,7 @@ function normalizarVoo(raw: unknown): OfertaVoo {
     origem: texto(departure.iataCode),
     destino: texto(arrival.iataCode),
     ida: texto(departure.at),
-    volta: texto(objeto(objeto(itineraries[1]).segments?.[0]).departure),
+    volta: texto(returnDeparture.at),
     passageiros: 1,
     classe: "Econômica",
     bagagem: "Consultar oferta",
@@ -206,6 +385,19 @@ function normalizarVoo(raw: unknown): OfertaVoo {
 export async function buscarVoos(params: Record<string, string | number>): Promise<OfertaVoo[]> {
   const raw = await chamar<Json>(() => api.get(`${BASE}/ofertas/voos`, { params }));
   return (Array.isArray(raw.data) ? raw.data : []).map(normalizarVoo);
+}
+
+export async function buscarLocalizacoes(keyword: string): Promise<{ iataCode: string; nome: string }[]> {
+  const raw = await chamar<Json>(() => api.get(`${BASE}/ofertas/localizacoes`, { params: { keyword } }));
+  return (Array.isArray(raw.data) ? raw.data : [])
+    .map((item: Json) => {
+      const address = objeto(item.address);
+      return {
+        iataCode: texto(item.iataCode).toUpperCase(),
+        nome: texto(address.cityName) || texto(item.name?.cityName) || texto(item.name),
+      };
+    })
+    .filter((item: { iataCode: string; nome: string }) => /^[A-Z]{3}$/.test(item.iataCode));
 }
 
 export async function precificarVoo(oferta: OfertaVoo | Json): Promise<Json> {
@@ -249,6 +441,19 @@ function normalizarHotel(raw: unknown): OfertaHotel {
     moeda: texto(price.currency) || "BRL",
     taxas: 0,
     preco: numero(price.total),
+    ...(texto(hotel.imageUrl)
+      ? { imagemUrl: texto(hotel.imageUrl) }
+      : value.simulated === true
+        ? {
+            imagemUrl: [
+              "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=900&q=80",
+              "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=900&q=80",
+              "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=900&q=80",
+            ][Math.abs(texto(hotel.hotelId).length) % 3] ?? "",
+          }
+        : {}),
+    latitude: numero(objeto(hotel.geoCode).latitude),
+    longitude: numero(objeto(hotel.geoCode).longitude),
     fonte: value.simulated === true ? "Locus (simulado)" : "Provedor configurado",
     consultadoEm: new Date().toISOString(),
     historico: [],

@@ -45,18 +45,34 @@ export function normalizarErro(e: unknown): LocusError {
   const status = err?.response?.status;
   const payload = err?.response?.data;
   const msg = payload?.mensagem ?? payload?.message;
+  const mensagem = mensagemTecnica(msg)
+    ? "Não foi possível concluir esta ação agora. Tente novamente em instantes."
+    : msg;
   const campos = payload?.erros ?? payload?.campos;
   if (status === 400 || status === 422)
-    return new LocusError("validacao", msg ?? "Alguns dados precisam de ajuste.", campos);
+    return new LocusError("validacao", mensagem ?? "Alguns dados precisam de ajuste.", campos);
   if (status === 401 || status === 403)
     return new LocusError("autenticacao", "Sua sessão expirou. Entre novamente.");
   if (status === 429)
     return new LocusError("quota", "O limite de consultas foi atingido. Tente mais tarde.");
   if (status === 502 || status === 503)
-    return new LocusError("provedor", msg ?? "O provedor externo não respondeu.");
+    return new LocusError("provedor", mensagem ?? "O provedor externo não respondeu.");
   if (status === 504) return new LocusError("timeout", "O provedor demorou para responder.");
   if (!err?.response) return new LocusError("rede", "Sem conexão com o servidor do Locus.");
-  return new LocusError("desconhecido", msg ?? "Algo deu errado.");
+  return new LocusError("desconhecido", mensagem ?? "Algo deu errado.");
+}
+
+function mensagemTecnica(mensagem?: string): boolean {
+  if (!mensagem) return false;
+
+  const normalizada = mensagem.toLowerCase();
+  return normalizada.includes("jdbc")
+    || normalizada.includes("hibernate")
+    || normalizada.includes("sql")
+    || normalizada.includes("column ")
+    || normalizada.includes("relation ")
+    || normalizada.includes("could not execute")
+    || normalizada.includes("constraint ");
 }
 
 export async function chamar<T>(fn: () => Promise<{ data: T }>): Promise<T> {

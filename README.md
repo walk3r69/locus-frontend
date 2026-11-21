@@ -43,7 +43,7 @@ Crie um arquivo `.env.local` na raiz:
 VITE_API_URL=http://localhost:8080
 VITE_BACKEND_USER_ID=1
 
-# Firebase é opcional no modo demonstrativo.
+# Firebase.
 VITE_FIREBASE_API_KEY=
 VITE_FIREBASE_AUTH_DOMAIN=
 VITE_FIREBASE_PROJECT_ID=
